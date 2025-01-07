@@ -4,6 +4,7 @@ import argparse
 import os
 import subprocess
 import time
+import shutil
 
 import requests
 from huggingface_hub import snapshot_download
@@ -24,6 +25,7 @@ def download_dataset(repo_id, local_dir, allow_patterns):
                 repo_id,
                 repo_type="dataset",
                 local_dir=local_dir,
+                cache_dir="~/.cache/huggingface/datasets/",
                 allow_patterns=allow_patterns,
                 resume_download=True,
                 max_workers=16,  # Don't hesitate to increase this number to lower the download time
@@ -80,77 +82,88 @@ def setup_terashuf(work_dir):
 def main(dataset, memory, data_dir, seed=42, nchunks=32):
     # Configuration
     repo_id = {
-        "fineweb_edu": "HuggingFaceFW/fineweb-edu",
+        "BLT": "HuggingFaceFW/fineweb-edu",
         "fineweb_edu_10bt": "HuggingFaceFW/fineweb-edu",
         "dclm_baseline_1.0": "mlfoundations/dclm-baseline-1.0",
         "dclm_baseline_1.0_10prct": "mlfoundations/dclm-baseline-1.0",
     }[dataset]
     src_dir = f"{data_dir}/{dataset}"
-    out_dir = f"{src_dir}_shuffled"
+    out_dir = os.path.expanduser(f"{src_dir}_shuffled")
     os.makedirs(out_dir, exist_ok=True)
-    work_dir = src_dir  # Directory of this Python file
-    prefix = f"{dataset}.chunk."
+    work_dir = os.path.expanduser(src_dir)  # Directory of this Python file
+    prefix = f"fineweb_edu.chunk."
     orig_extension = {
-        "fineweb_edu": ".jsonl",
+        "BLT": ".jsonl",
         "fineweb_edu_10bt": ".jsonl",
         "dclm_baseline_1.0": ".jsonl.zst",
         "dclm_baseline_1.0_10prct": ".jsonl.zst",
     }[dataset]
     cat_command = {
-        "fineweb_edu": "cat",
+        "BLT": "cat",
         "fineweb_edu_10bt": "cat",
         "dclm_baseline_1.0": "zstdcat",
         "dclm_baseline_1.0_10prct": "zstdcat",
     }[dataset]
     allow_patterns = {
-        "fineweb_edu": None,
+        "BLT": None,
         "fineweb_edu_10bt": "sample/10BT/*",
         "dclm_baseline_1.0": "*.jsonl.zst",
         "dclm_baseline_1.0_10prct": "global-shard_01_of_10/*.jsonl.zst",
     }[dataset]
     suffix = ".jsonl"
     k_validation = 10000  # Number of lines to take from each chunk for validation
+    validation_file = os.path.expanduser(f"{out_dir}/fineweb_edu.val{suffix}")
+    try:
+        os.remove(validation_file)
+    except Exception:
+        print(f'{validation_file} not found.')
+    try:
+        shutil.move(os.path.expanduser(src_dir+'/'+'tmp'), os.path.expanduser(src_dir+'/'+prefix+'00000.jsonl'))
+    except Exception:
+        print(os.path.expanduser(src_dir+'/'+'tmp')+' not found.')
 
     # Setup terashuf
-    terashuf_dir = setup_terashuf(work_dir)
+    src_dir+'/'+prefix+'00000.jsonl'
+    shutil.move(os.path.expanduser(src_dir+'/'+prefix+'00000.jsonl'), os.path.expanduser(src_dir+'/'+'tmp'))#0th file is treated as development set
+    #terashuf_dir = setup_terashuf(work_dir)
 
     # Download dataset
-    download_dataset(repo_id, src_dir, allow_patterns)
+    #download_dataset(repo_id, src_dir, allow_patterns)
 
-    if "fineweb" in dataset:
-        parquet_to_jsonl(dataset, work_dir, src_dir, src_dir)
+    
+
+    #if "fineweb" in dataset:
+    #    parquet_to_jsonl(dataset, work_dir, src_dir, src_dir)
 
     # Set up environment variables
     os.environ["MEMORY"] = f"{memory}"
     os.environ["SEED"] = f"{seed}"
 
     # Run the original shuffling and splitting command
-    terashuf_executable = os.path.join(terashuf_dir, "terashuf")
+    #terashuf_executable = os.path.join(terashuf_dir, "terashuf")
     run_command(
         f"ulimit -n 100000 && "
-        f"find {src_dir} -type f -name '*{orig_extension}' -print0 | xargs -0 {cat_command} | {terashuf_executable} | "
+        f"find {src_dir} -type f -name '*{orig_extension}' -print0 | xargs -0 {cat_command} | "# {terashuf_executable} |#no shuffling, since it's already shuffled.
         f"split -n r/{nchunks} -d --suffix-length 2 --additional-suffix {suffix} - {out_dir}/{prefix}"
-        "; trap 'echo \"Caught signal 13, exiting with code 1\"; exit 1' SIGPIPE;"
+        ";"#"; trap 'echo \"Caught signal 13, exiting with code 1\"; exit 1' SIGPIPE;"
     )
 
     # Create validation set and remove lines from chunks
-    validation_file = f"{out_dir}/{dataset}.val{suffix}"
-    for i in range(nchunks):
-        chunk_file = f"{out_dir}/{prefix}{i:02d}{suffix}"
-        run_command(f"head -n {k_validation} {chunk_file} >> {validation_file}")
-        run_command(f"sed -i '1,{k_validation}d' {chunk_file}")
+    shutil.move(os.path.expanduser(src_dir+'/'+'tmp'), os.path.expanduser(validation_file))#0th file is treated as development set
 
     print("All tasks completed successfully!")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("dataset", type=str)
+    parser.add_argument("dataset", type=str)#BLT
     parser.add_argument("memory", type=float, default=8)
-    parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument("--data_dir", type=str, default="data")#~/TimelessLanguagePretraining/datasets
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--nchunks", type=int, default=32)
+    parser.add_argument("--nchunks", type=int, default=32)#1
 
     args = parser.parse_args()
 
     main(args.dataset, args.memory, args.data_dir, args.seed, args.nchunks)
+
+
