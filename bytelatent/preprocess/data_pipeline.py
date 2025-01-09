@@ -5,9 +5,9 @@ from pathlib import Path
 import luigi
 
 # CHANGEME: Change this to point to your data
-BASE_DIR = Path("datasets")
-DATASETS = ["dclm"]
-TARGET_DIR = Path("entropy_preprocess")
+BASE_DIR = Path("data")
+DATASETS = ["BLT_shuffled"]
+TARGET_DIR = Path("data")
 
 SHARD_SCRIPT = """split -C 2500m -d {source} {destination}.shard_"""
 
@@ -71,4 +71,4 @@ class ShardAllDatasets(luigi.WrapperTask):
 
 
 if __name__ == "__main__":
-    luigi.build([ShardAllDatasets()], local_scheduler=True, workers=128)
+    luigi.build([ShardAllDatasets()], local_scheduler=True, workers=1)

@@ -16,6 +16,12 @@ class BltExample(BaseModel):
     patch_lengths: list[int] | None
     mask: list[bool] | None
 
+class LMExample(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sample_id: str
+    text: str
+    tokens: list[int] | None
+    mask: list[bool] | None
 
 class MultiChoiceState(BaseModel):
     model_config = ConfigDict(extra="forbid")
