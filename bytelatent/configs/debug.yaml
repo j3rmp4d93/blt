@@ -83,7 +83,7 @@ data:
   tokenizer_args:
     name: blt
     init_kwargs:
-      bpe_tokenizer_path: ???
+      bpe_tokenizer_path: data/original
 
 profiling:
   run: false

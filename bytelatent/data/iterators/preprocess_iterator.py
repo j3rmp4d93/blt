@@ -4,7 +4,7 @@ from typing import Any, Generator
 import torch
 from pydantic import BaseModel, ConfigDict
 
-from bytelatent.data.data_types import BltExample
+from bytelatent.data.data_types import BltExample, LMExample
 from bytelatent.data.iterators.abstract_iterator import IteratorState, StatefulIterator
 from bytelatent.data.iterators.arrow_iterator import (
     ArrowFileIterator,
@@ -22,7 +22,7 @@ class PreprocessIteratorState(BaseModel, IteratorState):
     add_tokens: bool
     add_patches: bool
     tokenizer_args: TokenizerArgs
-    patcher_args: PatcherArgs
+    patcher_args: PatcherArgs|None
 
     def build(self):
         arrow_iterator = self.arrow_file_iterator_state.build()
@@ -32,6 +32,7 @@ class PreprocessIteratorState(BaseModel, IteratorState):
             tokenizer_args=self.tokenizer_args,
             add_tokens=self.add_tokens,
             add_patches=self.add_patches,
+            return_BltExample=self.patcher_args is not None and self.add_patches,
         )
 
 
@@ -47,9 +48,11 @@ class PreprocessIterator(StatefulIterator):
         *,
         patcher_args: PatcherArgs,
         tokenizer_args: TokenizerArgs,
+        return_BltExample: bool,
         add_tokens: bool = True,
         add_patches: bool = True,
     ):
+        self.return_BltExample = return_BltExample
         self.arrow_iterator = arrow_iterator
         self.tokenizer_args = tokenizer_args
         self.patcher_args = patcher_args
@@ -71,7 +74,7 @@ class PreprocessIterator(StatefulIterator):
             add_patches=self.add_patches,
         )
 
-    def create_iter(self) -> Generator[BltExample, Any, None]:
+    def create_iter(self) -> Generator[BltExample|LMExample, Any, None]:
         if self.tokenizer is None and self.add_tokens:
             self.tokenizer = self.tokenizer_args.build()
         if self.patcher is None and self.add_patches:
@@ -101,11 +104,19 @@ class PreprocessIterator(StatefulIterator):
                     include_next_token=False,
                     entropies=entropies,
                 )[0][0].tolist()
-            yield BltExample(
-                sample_id=example.sample_id,
-                text=example.text,
-                tokens=tokens,
-                mask=[True] * len(tokens),
-                patch_lengths=patch_lengths,
-                entropies=example.entropies,
-            )
+            if self.return_BltExample:
+                yield BltExample(
+                    sample_id=example.sample_id,
+                    text=example.text,
+                    tokens=tokens,
+                    mask=[True] * len(tokens),
+                    patch_lengths=patch_lengths,
+                    entropies=example.entropies,
+                )
+            else:
+                yield LMExample(
+                    sample_id=example.sample_id,
+                    text=example.text,
+                    tokens=tokens,
+                    mask=[True] * len(tokens),
+                )

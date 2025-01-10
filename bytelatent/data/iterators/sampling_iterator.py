@@ -14,12 +14,12 @@ class SamplingIteratorState(BaseModel):
     source_to_weight: dict[str, float]
     source_to_iterator_state: dict[str, SequenceIteratorState]
 
-    def build(self) -> "SamplingIterator":
+    def build(self, is_for_blt: bool) -> "SamplingIterator":
         return SamplingIterator(
             rng_state=self.rng_state,
             source_to_weight=self.source_to_weight,
             source_to_iterator={
-                source: state.build()
+                source: state.build(is_for_blt)
                 for source, state in self.source_to_iterator_state.items()
             },
         )

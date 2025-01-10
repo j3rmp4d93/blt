@@ -11,7 +11,7 @@ import pyarrow.dataset  # pyright: ignore
 from pydantic import BaseModel, ConfigDict
 
 from bytelatent import ByteLatentError
-from bytelatent.data.data_types import BltExample
+from bytelatent.data.data_types import BltExample, LMExample
 from bytelatent.data.iterators.abstract_iterator import IteratorState, StatefulIterator
 
 logger = getLogger(__name__)
@@ -23,6 +23,7 @@ class ArrowFileIteratorState(BaseModel, IteratorState):
     row_num: int
     num_workers: int
     worker_id: int
+    for_blt: bool
     preprocess_dir: str | None
     dataset_files: list[str] | None
     entropy_model_name: str | None
@@ -37,6 +38,7 @@ class ArrowFileIteratorState(BaseModel, IteratorState):
             entropy_model_name=self.entropy_model_name,
             arrow_batch_size=self.arrow_batch_size,
             dataset_files=self.dataset_files,
+            for_blt=self.for_blt,
         )
         if self.row_num != 0:
             arrow_file._set_row_num(self.row_num)
@@ -52,15 +54,18 @@ def shard_sort_key(file: str | Path):
 class ArrowFileIterator(StatefulIterator):
     def __init__(
         self,
-        *,
         file_path: str | None,
         worker_id: int,
         num_workers: int,
+        for_blt: bool,
         preprocess_dir: str | None,
         entropy_model_name: str | None,
         arrow_batch_size: int,
         dataset_files: list[str] | None = None,
+        id_field = 'sample_id',
     ):
+        self.id_field = id_field
+        self.for_blt = for_blt
         assert 0 <= worker_id < num_workers, (worker_id, num_workers)
         if file_path is None and dataset_files is None:
             raise ByteLatentError("file_path and dataset_files cannot both be None")
@@ -80,9 +85,13 @@ class ArrowFileIterator(StatefulIterator):
             jsonl_file = Path(file_path)
             parts = re.match(r"(.+)\.chunk\.[0-9]+\.jsonl", jsonl_file.name)
             assert parts is not None
-            dataset = parts.group(1)
-            data_dir = Path(preprocess_dir) / dataset / entropy_model_name
-            shard_files = list(data_dir.glob(f"{jsonl_file.name}.shard_*.arrow"))
+            if entropy_model_name is not None:
+                dataset = parts.group(1)
+                data_dir = Path(preprocess_dir) / dataset / entropy_model_name
+                shard_files = list(data_dir.glob(f"{jsonl_file.name}.shard_*.arrow"))
+            else:
+                data_dir = jsonl_file.parent
+                shard_files = list(jsonl_file.parent.glob("*.shard_*.arrow"))
             for s in shard_files:
                 if not (data_dir / f"{s.name}.complete").exists():
                     raise ValueError(f"Missing .complete for input file: {s}")
@@ -107,11 +116,12 @@ class ArrowFileIterator(StatefulIterator):
             entropy_model_name=self.entropy_model_name,
             arrow_batch_size=self.arrow_batch_size,
             dataset_files=self.dataset_files,
+            for_blt=self.for_blt,
         )
 
     def create_iter(
         self,
-    ) -> Generator[BltExample, Any, None]:
+    ) -> Generator[BltExample|LMExample, Any, None]:
         if self.dataset is None:
             self.dataset = pa.dataset.dataset(self.dataset_files, format="arrow")
             self.batch_iterator = self.dataset.to_batches(
@@ -121,36 +131,54 @@ class ArrowFileIterator(StatefulIterator):
         if self.batch_to_consume is not None:
             batch_columns: dict[str, list] = self.batch_to_consume
             self.batch_to_consume = None
-            sample_ids = batch_columns["sample_id"]
+            sample_ids = batch_columns[self.id_field]
             texts = batch_columns["text"]
-            entropies = batch_columns["entropies"]
+            if self.for_blt:
+                entropies = batch_columns["entropies"]
             for i in range(len(sample_ids)):
-                out = BltExample(
-                    sample_id=sample_ids[i],
-                    entropies=entropies[i],
-                    text=texts[i],
-                    tokens=None,
-                    mask=None,
-                    patch_lengths=None,
-                )
+                if self.for_blt:
+                    out = BltExample(
+                        sample_id=sample_ids[i],
+                        entropies=entropies[i],
+                        text=texts[i],
+                        tokens=None,
+                        mask=None,
+                        patch_lengths=None,
+                    )
+                else:
+                    out = LMExample(
+                        sample_id=sample_ids[i],
+                        text=texts[i],
+                        tokens=None,
+                        mask=None,
+                    )
                 self.row_num += 1
                 if (self.row_num - 1) % self.num_workers == self.worker_id:
                     yield out
 
         for batch in self.batch_iterator:
             batch_columns = batch.to_pydict()
-            sample_ids = batch_columns["sample_id"]
+            sample_ids = batch_columns[self.id_field]
             texts = batch_columns["text"]
-            entropies = batch_columns["entropies"]
+            if self.for_blt:
+                entropies = batch_columns["entropies"]
             for i in range(len(sample_ids)):
-                out = BltExample(
-                    sample_id=sample_ids[i],
-                    entropies=entropies[i],
-                    text=texts[i],
-                    tokens=None,
-                    mask=None,
-                    patch_lengths=None,
-                )
+                if self.for_blt:
+                    out = BltExample(
+                        sample_id=sample_ids[i],
+                        entropies=entropies[i],
+                        text=texts[i],
+                        tokens=None,
+                        mask=None,
+                        patch_lengths=None,
+                    )
+                else:
+                    out = LMExample(
+                        sample_id=sample_ids[i],
+                        text=texts[i],
+                        tokens=None,
+                        mask=None,
+                    )
                 self.row_num += 1
                 if (self.row_num - 1) % self.num_workers == self.worker_id:
                     yield out
@@ -173,12 +201,13 @@ class ArrowFileIterator(StatefulIterator):
             for batch in self.batch_iterator:
                 if len(batch) > curr_remaining:
                     batch_columns: dict[str, list] = batch.to_pydict()
-                    batch_columns["sample_id"] = batch_columns["sample_id"][
+                    batch_columns[self.id_field] = batch_columns[self.id_field][
                         curr_remaining:
                     ]
-                    batch_columns["entropies"] = batch_columns["entropies"][
-                        curr_remaining:
-                    ]
+                    if self.for_blt:
+                        batch_columns["entropies"] = batch_columns["entropies"][
+                            curr_remaining:
+                        ]
                     batch_columns["text"] = batch_columns["text"][curr_remaining:]
                     self.batch_to_consume = batch_columns
                     break

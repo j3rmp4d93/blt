@@ -17,6 +17,7 @@ class PackingArgs(BaseModel):
     max_length: int | None
     pad_to_max_length: bool
     enable_byte_ngrams: bool
+    is_for_blt: bool = False
 
 
 class PackingIteratorState(BaseModel, IteratorState):
@@ -26,7 +27,7 @@ class PackingIteratorState(BaseModel, IteratorState):
 
     def build(self) -> "PackingIterator":
         return PackingIterator(
-            sequence_iterator=self.sequence_iterator_state.build(),
+            sequence_iterator=self.sequence_iterator_state.build(self.packing_args.is_for_blt),
             packing_args=self.packing_args,
         )
 
@@ -155,72 +156,112 @@ class PackingIterator(StatefulIterator[Batch, PackingIteratorState]):
         batch_size = self.packing_args.batch_size
         pad_id = self.packing_args.pad_id
         seq_len = self.packing_args.seq_len
-        pad_to_max_length = self.packing_args.pad_to_max_length
-        enable_byte_ngrams = self.packing_args.enable_byte_ngrams
+
         max_length = self.packing_args.max_length
-        while True:
-            tokens: list[list[int]] = []
-            masks: list[list[bool]] = []
-            patch_lengths: list[list[int]] = []
+        if self.packing_args.is_for_blt:
+            pad_to_max_length = self.packing_args.pad_to_max_length
+            enable_byte_ngrams = self.packing_args.enable_byte_ngrams
+            
+            while True:
+                tokens: list[list[int]] = []
+                masks: list[list[bool]] = []
+                patch_lengths: list[list[int]] = []
 
-            for _ in range(self.packing_args.batch_size):
-                sequence = next(sequence_iter)
-                _tokens = sequence.tokens
-                _mask = sequence.mask
-                _patch_lengths = sequence.patch_lengths
-                assert len(sequence.patch_lengths) == self.packing_args.seq_len
-                last_patch_length = 0
-                if _patch_lengths[0] > 1:
-                    last_patch_length = _patch_lengths[-1]
-                    _patch_lengths[0] -= 1
-                    _patch_lengths = [1] + _patch_lengths[:-1]
-                tokens.append(_tokens[: len(_tokens) - last_patch_length])
-                masks.append(_mask[: len(_mask) - last_patch_length])
-                patch_lengths.append(_patch_lengths)
+                for _ in range(self.packing_args.batch_size):
+                    sequence = next(sequence_iter)
+                    _tokens = sequence.tokens
+                    _mask = sequence.mask
+                    _patch_lengths = sequence.patch_lengths
+                    assert len(sequence.patch_lengths) == self.packing_args.seq_len
+                    last_patch_length = 0
+                    if _patch_lengths[0] > 1:
+                        last_patch_length = _patch_lengths[-1]
+                        _patch_lengths[0] -= 1
+                        _patch_lengths = [1] + _patch_lengths[:-1]
+                    tokens.append(_tokens[: len(_tokens) - last_patch_length])
+                    masks.append(_mask[: len(_mask) - last_patch_length])
+                    patch_lengths.append(_patch_lengths)
 
-            x_patch_lengths = np.array(patch_lengths)
-            # pad batch to same length
-            tok_seq_len = max([len(toks) for toks in tokens]) - 1
-            x = np.full((batch_size, tok_seq_len), fill_value=pad_id)
-            y = np.full((batch_size, tok_seq_len), fill_value=pad_id)
+                x_patch_lengths = np.array(patch_lengths)
+                # pad batch to same length
+                tok_seq_len = max([len(toks) for toks in tokens]) - 1
+                x = np.full((batch_size, tok_seq_len), fill_value=pad_id)
+                y = np.full((batch_size, tok_seq_len), fill_value=pad_id)
 
-            for i, tok_seq in enumerate(tokens):
-                x[i, : len(tok_seq) - 1] = tok_seq[:-1]
-                y[i, : len(tok_seq) - 1] = tok_seq[1:]
-                # Adjust patch lengths to match x
-                x_patch_lengths[i, -1] += tok_seq_len - (len(tok_seq) - 1)
+                for i, tok_seq in enumerate(tokens):
+                    x[i, : len(tok_seq) - 1] = tok_seq[:-1]
+                    y[i, : len(tok_seq) - 1] = tok_seq[1:]
+                    # Adjust patch lengths to match x
+                    x_patch_lengths[i, -1] += tok_seq_len - (len(tok_seq) - 1)
 
-            assert x_patch_lengths.shape == (batch_size, seq_len)
+                assert x_patch_lengths.shape == (batch_size, seq_len)
 
-            if enable_byte_ngrams:
-                raise NotImplementedError()
-            else:
-                ngram_ids = None
+                if enable_byte_ngrams:
+                    raise NotImplementedError()
+                else:
+                    ngram_ids = None
 
-            batch = Batch(
-                x=x,
-                y=y,
-                patch_lengths=x_patch_lengths,
-                ngram_ids=ngram_ids,
-                mask=_merge_patch_seq_masks(batch_size, tok_seq_len, masks),
-            )
-            assert (
-                x_patch_lengths.sum() == x.size + batch_size
-            ), f"{x_patch_lengths.sum()} != {x.size + batch_size}"
-            assert (
-                batch.mask is None or np.sum(x != pad_id) == batch.mask.sum()
-            ), f"{np.sum(x != pad_id)} != {batch.mask.sum()}"
-            assert np.all(
-                x_patch_lengths[:, 0] == 1
-            ), f"first patch should always be 1, {x_patch_lengths[:, 0]}"
-            # cuda_gb_allocated = (torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024)
-            # cuda_gb_reserved = torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024
-            # print(f"dataloader cuda_gb_allocated: {cuda_gb_allocated}, cuda_gb_reserved: {cuda_gb_reserved}")
-            truncate_batch(
-                batch,
-                max_length=max_length,
-                pad_id=pad_id,
-                pad_to_max_length=pad_to_max_length,
-                enable_byte_ngrams=enable_byte_ngrams,
-            )
-            yield batch
+                batch = Batch(
+                    x=x,
+                    y=y,
+                    patch_lengths=x_patch_lengths,
+                    ngram_ids=ngram_ids,
+                    mask=_merge_patch_seq_masks(batch_size, tok_seq_len, masks),
+                )
+                assert (
+                    x_patch_lengths.sum() == x.size + batch_size
+                ), f"{x_patch_lengths.sum()} != {x.size + batch_size}"
+                assert (
+                    batch.mask is None or np.sum(x != pad_id) == batch.mask.sum()
+                ), f"{np.sum(x != pad_id)} != {batch.mask.sum()}"
+                assert np.all(
+                    x_patch_lengths[:, 0] == 1
+                ), f"first patch should always be 1, {x_patch_lengths[:, 0]}"
+                # cuda_gb_allocated = (torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024)
+                # cuda_gb_reserved = torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024
+                # print(f"dataloader cuda_gb_allocated: {cuda_gb_allocated}, cuda_gb_reserved: {cuda_gb_reserved}")
+                truncate_batch(
+                    batch,
+                    max_length=max_length,
+                    pad_id=pad_id,
+                    pad_to_max_length=pad_to_max_length,
+                    enable_byte_ngrams=enable_byte_ngrams,
+                )
+                yield batch
+        else:
+            while True:
+                tokens: list[list[int]] = []
+                masks: list[list[bool]] = []
+
+                for _ in range(self.packing_args.batch_size):
+                    sequence = next(sequence_iter)                   
+                    tokens.append(sequence.tokens)
+                    masks.append(sequence.mask)
+                # pad batch to same length
+                tok_seq_len = max([len(toks) for toks in tokens]) - 1
+                x = np.full((batch_size, tok_seq_len), fill_value=pad_id)
+                y = np.full((batch_size, tok_seq_len), fill_value=pad_id)
+
+                for i, tok_seq in enumerate(tokens):
+                    x[i, : len(tok_seq) - 1] = tok_seq[:-1]
+                    y[i, : len(tok_seq) - 1] = tok_seq[1:]
+                    # Adjust patch lengths to match x
+
+                batch = Batch(
+                    x=x,
+                    y=y,
+                    patch_lengths=None,
+                    ngram_ids=None,
+                    mask=_merge_patch_seq_masks(batch_size, tok_seq_len, masks),
+                )
+                assert (
+                    batch.mask is None or np.sum(x != pad_id) == batch.mask.sum()
+                ), f"{np.sum(x != pad_id)} != {batch.mask.sum()}"
+                truncate_batch(
+                    batch,
+                    max_length=max_length,
+                    pad_id=pad_id,
+                    pad_to_max_length=True,
+                    enable_byte_ngrams=False,
+                )
+                yield batch

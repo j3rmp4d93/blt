@@ -30,6 +30,7 @@ from bytelatent.model.blt import ByteLatentTransformerArgs
 from bytelatent.optim import OptimArgs
 from bytelatent.profiling import ProfilerArgs
 from bytelatent.tokenizers.build_tokenizer import TokenizerArgs
+from bytelatent.transformer import LMTransformer, LMTransformerArgs
 
 logger = logging.getLogger()
 
@@ -46,6 +47,7 @@ def distribute_data_to_rank(
     arrow_batch_size: int,
     rank: int,
     world_size: int,
+    for_blt: bool,
 ) -> ArrowFileIterator:
     dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size)
     n_workers_per_chunk = world_size // len(dataset_chunks)
@@ -61,6 +63,7 @@ def distribute_data_to_rank(
                     dataset_files=None,
                     entropy_model_name=entropy_model_name,
                     arrow_batch_size=arrow_batch_size,
+                    for_blt=for_blt,
                 )
             )
     return rank_to_arrow_iterator_params[rank]
@@ -107,17 +110,20 @@ class DataloaderArgs(BaseModel):
                 arrow_batch_size=self.arrow_batch_size,
                 rank=rank,
                 world_size=world_size,
+                for_blt=True,
             )
             looping_iterator = LoopingIterator(arrow_iterator)
             preprocess_iterator = PreprocessIterator(
                 looping_iterator,
                 patcher_args=self.patcher_args,
                 tokenizer_args=self.tokenizer_args,
+                return_BltExample=True,
             )
             sequence_iterator = SequenceIterator(
                 preprocess_iterator,
                 sequence_packing_args=sequence_packing_args,
                 rng_state=shuffle_rng_state,
+                is_for_blt=True,
             )
 
             source_to_sequence_iterator[dataset_path] = sequence_iterator
@@ -149,6 +155,71 @@ class DataloaderArgs(BaseModel):
 
         return mp_iterator
 
+class DataloaderArgs_entropy(DataloaderArgs):
+
+    def build_from_rank(
+        self, rank: int, world_size: int
+    ) -> StatefulIterator[Batch, Any]:
+        source_to_sequence_iterators = self._create_sequence_iterators(rank, world_size)
+        weight_rng_state = get_rng_state(self.seed + 1, rank, world_size)
+        sampling_iterator = SamplingIterator(
+            rng_state=weight_rng_state,
+            source_to_weight=self.sources,
+            source_to_iterator=source_to_sequence_iterators,
+        )
+        tokenizer = self.tokenizer_args.build()
+        packing_args = PackingArgs(
+            batch_size=self.batch_size,
+            seq_len=self.seq_len,
+            pad_id=tokenizer.eos_id,
+            max_length=self.max_encoder_seq_length,
+            pad_to_max_length=self.pad_to_max_length,
+            enable_byte_ngrams=False,
+            is_for_blt = False,
+        )
+        packing_iterator = PackingIterator(sampling_iterator, packing_args=packing_args)
+        mp_iterator = MultiprocessIterator(
+            packing_iterator, n_batches_to_prefetch=self.prefetch_size
+        )
+
+        return mp_iterator
+
+    def _create_sequence_iterators(
+        self, rank: int, world_size: int
+    ) -> dict[str, SequenceIterator]:
+        sequence_packing_args = SequencePackingArgs(
+            output_seq_len=self.seq_len,
+            buffer_size=self.buffer_size,
+        )
+        source_to_sequence_iterator: dict[str, SequenceIterator] = {}
+        for dataset_path in self.sources:
+            shuffle_rng_state = get_rng_state(self.seed + 1, rank, world_size)
+            arrow_iterator = distribute_data_to_rank(
+                dataset_path=os.path.join(self.root_dir, dataset_path),
+                preprocess_dir=self.preprocess_dir,
+                arrow_batch_size=self.arrow_batch_size,
+                entropy_model_name=None,
+                rank=rank,
+                world_size=world_size,
+                for_blt=False,
+            )
+            looping_iterator = LoopingIterator(arrow_iterator)
+            preprocess_iterator = PreprocessIterator(
+                looping_iterator,
+                patcher_args=None,
+                tokenizer_args=self.tokenizer_args,
+                add_patches=False,
+                return_BltExample=False,
+            )
+            sequence_iterator = SequenceIterator(
+                preprocess_iterator,
+                sequence_packing_args=sequence_packing_args,
+                rng_state=shuffle_rng_state,
+                is_for_blt=False,
+            )
+
+            source_to_sequence_iterator[dataset_path] = sequence_iterator
+        return source_to_sequence_iterator
 
 class TrainArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -170,6 +241,55 @@ class TrainArgs(BaseModel):
     data: DataloaderArgs = DataloaderArgs()
     optim: OptimArgs = OptimArgs()
     model: ByteLatentTransformerArgs = ByteLatentTransformerArgs()
+    distributed: DistributedArgs = DistributedArgs()
+    env: EnvironmentArgs = EnvironmentArgs()
+
+    checkpoint: CheckpointArgs = CheckpointArgs()
+    profiling: ProfilerArgs = ProfilerArgs()
+    logging: LoggingArgs = LoggingArgs()
+
+    # If set to None, eval is run locally otherwise it launches a new job with the given number of gpus
+    async_eval_gpus: int | None = None
+    eval: Any | None = None
+    eval_on_gpus: int | None = None
+
+    def dump_to_yaml_file(
+        self, path: str, log_config: bool = True, sort_keys: bool = True
+    ):
+        model_dict = self.model_dump(mode="json")
+        yaml_str = yaml.dump(
+            model_dict,
+            allow_unicode=True,
+            sort_keys=sort_keys,
+            default_flow_style=False,
+        )
+        with open(path, "w") as f:
+            if log_config:
+                logger.info("Using the following config for this run:")
+                logger.info(yaml_str)
+            f.write(yaml_str)
+
+
+class TrainArgs_entropy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = "lingua"
+    dump_dir: str = ""
+
+    seed: int = 42
+
+    # Number of gradient accumulation steps
+    # Total batch size is batch_size*grad_acc_steps
+    grad_acc_steps: int = 1
+
+    gc_collect_freq: int = 1000
+    probe_freq: int | None = None
+
+    # Nb optimizer steps to take
+    steps: int = 1000
+
+    data: DataloaderArgs_entropy = DataloaderArgs_entropy()
+    optim: OptimArgs = OptimArgs()
+    model: LMTransformerArgs = LMTransformerArgs()
     distributed: DistributedArgs = DistributedArgs()
     env: EnvironmentArgs = EnvironmentArgs()
 

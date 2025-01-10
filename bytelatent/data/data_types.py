@@ -54,8 +54,13 @@ class DataLoaderState(BaseModel):
 
 
 BltIterator = Iterator[tuple[BltExample, DataLoaderState]]
+LmIterator = Iterator[tuple[LMExample, DataLoaderState]]
 
 
+class LMSequence(BaseModel):
+    tokens: list[int]
+    mask: list[bool]
+    
 class BltSequence(BaseModel):
     tokens: list[int]
     mask: list[bool]

@@ -203,7 +203,8 @@ def compute_loss(p, y, mask, scale):
     return loss, tok_loss
 
 
-def train(args: TrainArgs):
+def train(args: TrainArgs, model_cls):
+    is_training_blt= (ByteLatentTransformer==model_cls)
     with ExitStack() as context_stack:
         tokenizer = args.data.tokenizer_args.build()
         validate_train_args(
@@ -237,7 +238,7 @@ def train(args: TrainArgs):
 
         # Initializing Model in meta device allows us to initialize models much bigger than 1 gpu's memory
         with torch.device("meta"):
-            model = ByteLatentTransformer(args.model)
+            model = model_cls(args.model)
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
@@ -342,10 +343,11 @@ def train(args: TrainArgs):
                 batch.x,
             ).cuda()
             batch_y = torch.from_numpy(batch.y).cuda()
-            batch_patch_lengths = torch.from_numpy(batch.patch_lengths).cuda()
+            if is_training_blt:
+                batch_patch_lengths = torch.from_numpy(batch.patch_lengths).cuda()
             mask = None if batch.mask is None else torch.from_numpy(batch.mask).cuda()
 
-            if args.model.encoder_enable_byte_ngrams and batch.ngram_ids is None:
+            if is_training_blt and (args.model.encoder_enable_byte_ngrams and batch.ngram_ids is None):
                 raise ValueError(
                     "Cannot enable byte ngrams and have batch.ngram_ids be None"
                 )
@@ -408,9 +410,12 @@ def train(args: TrainArgs):
                     next(probe_mod.parameters()).grad is None
                 ), "Probe model shouldn't have grads at this point"
 
-            pred = model(
-                batch_x, patch_lengths=batch_patch_lengths, ngram_ids=ngram_ids
-            )
+            if is_training_blt:
+                pred = model(
+                    batch_x, patch_lengths=batch_patch_lengths, ngram_ids=ngram_ids
+                )
+            else:
+                pred = model(batch_x)
 
             loss, _ = compute_loss(pred, batch_y, mask, train_state.scale)
 
@@ -644,7 +649,7 @@ def main():
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     train_args = TrainArgs.model_validate(cfg)
-    train(train_args)
+    train(train_args, ByteLatentTransformer)
 
 
 if __name__ == "__main__":
