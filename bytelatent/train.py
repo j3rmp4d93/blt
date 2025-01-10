@@ -41,7 +41,7 @@ from bytelatent.distributed import (
 )
 from bytelatent.logger import init_logger
 from bytelatent.metrics import GPUMemoryMonitor, MetricLogger, get_num_params
-from bytelatent.model.blt import ByteLatentTransformer
+from bytelatent.model.blt import ByteLatentTransformer, ByteLatentTransformerArgs
 from bytelatent.optim import build_optimizer
 from bytelatent.probe import AutoProbeD
 from bytelatent.profiling import maybe_run_profiler
@@ -203,7 +203,7 @@ def compute_loss(p, y, mask, scale):
     return loss, tok_loss
 
 
-def train(args: TrainArgs, model_cls):
+def train(args: TrainArgs, model_cls, model_args_cls):
     is_training_blt= (ByteLatentTransformer==model_cls)
     with ExitStack() as context_stack:
         tokenizer = args.data.tokenizer_args.build()
@@ -561,7 +561,7 @@ def train(args: TrainArgs, model_cls):
                 )
                 eval_args.metric_log_dir = args.dump_dir
                 if args.async_eval_gpus is None:
-                    launch_eval(eval_args)
+                    launch_eval(eval_args, model_cls, model_args_cls)
                 elif get_is_master():
                     if wandb.run is not None and args.logging.wandb is not None:
                         eval_args.wandb = deepcopy(args.logging.wandb)
@@ -649,7 +649,7 @@ def main():
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     train_args = TrainArgs.model_validate(cfg)
-    train(train_args, ByteLatentTransformer)
+    train(train_args, ByteLatentTransformer, ByteLatentTransformerArgs)
 
 
 if __name__ == "__main__":

@@ -7,8 +7,8 @@ from typing import List, Optional
 
 import torch
 from lingua.args import dataclass_from_dict
-from lingua.tokenizers.abstract_tokenizer import Tokenizer
-from lingua.tokenizers.build_tokenizer import build_tokenizer
+from lingua.tokenizer import Tokenizer
+from lingua.tokenizer import build_tokenizer
 from omegaconf import OmegaConf
 from torch import nn
 from torch.nn import functional as F

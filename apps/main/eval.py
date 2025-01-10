@@ -26,6 +26,7 @@ from bytelatent.distributed import (
     setup_torch_distributed,
 )
 from bytelatent.transformer import LMTransformer, LMTransformerArgs
+from bytelatent.model.blt import ByteLatentTransformer, ByteLatentTransformerArgs
 
 from apps.main.generate import (
     PackedCausalTransformerGenerator,
@@ -232,7 +233,7 @@ def eval_on_val(generator, val_args: ValidationArgs, train_cfg):
     return all_val_metrics
 
 
-def launch_eval(cfg: EvalArgs):
+def launch_eval(cfg: EvalArgs, model_cls: LMTransformer|ByteLatentTransformer, model_args_cls: LMTransformerArgs|ByteLatentTransformerArgs):
     if not torch.distributed.is_initialized():
         setup_torch_distributed(DistributedArgs())
     if (
@@ -254,8 +255,8 @@ def launch_eval(cfg: EvalArgs):
     logger.info("Loading model")
     model, tokenizer, train_cfg = load_consolidated_model_and_tokenizer(
         consolidate_path,
-        model_cls=LMTransformer,
-        model_args_cls=LMTransformerArgs,
+        model_cls=model_cls,
+        model_args_cls=model_args_cls,
     )
     logger.info("Model loaded")
     model.eval()

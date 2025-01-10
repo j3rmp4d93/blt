@@ -85,7 +85,7 @@ def main():
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     train_args = TrainArgs_entropy.model_validate(cfg)
-    train(train_args, LMTransformer)
+    train(train_args, LMTransformer, LMTransformerArgs)
 
 if __name__ == "__main__":
     main()

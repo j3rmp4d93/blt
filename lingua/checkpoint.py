@@ -4,24 +4,33 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FileSystemReader
 import torch.nn as nn
-import torch.optim.optimizer
-from pydantic import BaseModel, ConfigDict
+from omegaconf import OmegaConf
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
     get_model_state_dict,
+    get_optimizer_state_dict,
     get_state_dict,
     set_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
 )
+from torch.distributed.checkpoint.format_utils import (
+    torch_save_to_dcp,
+    dcp_to_torch_save,
+)
+import torch.optim.optimizer
 
-from bytelatent.distributed import get_is_master
+from lingua.distributed import get_is_master
 
 logger = logging.getLogger("CHECKPOINT")
 
@@ -38,18 +47,18 @@ TRAIN_STATE_NAME = "train_state_{:05d}.json"
 RE_DIGITS = re.compile(r"\d+")
 
 
-class SaveEvery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+@dataclass
+class SaveEvery:
     every: int = 1000
     keep: int = 0
 
 
-class CheckpointArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    dump: SaveEvery = SaveEvery()
-    eval: SaveEvery = SaveEvery()
-    path: str | None = None
-    init_ckpt_path: str | None = None
+@dataclass
+class CheckpointArgs:
+    dump: SaveEvery = field(default_factory=SaveEvery)
+    eval: SaveEvery = field(default_factory=SaveEvery)
+    path: Optional[str] = None
+    init_ckpt_path: Optional[str] = None
     continue_training_from_init: bool = False
 
 
@@ -78,29 +87,19 @@ def consolidate_checkpoints(ckpt_dir: str):
         logger.info("Consolidated !")
     return consolidate_path
 
-
-def load_from_checkpoint(
-    ckpt_dir: str,
-    model: nn.Module,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    model_key: str = "model",
-    optim_key: str = "optim",
-):
-    if not (Path(ckpt_dir) / ".metadata").exists():
-        raise ValueError(
-            f"Please convert the checkpoint distcp format using `torch.distributed.checkpoint.format_utils.torch_save_to_dcp` before loading it"
-        )
-
+def load_from_checkpoint(ckpt_dir: str, model: nn.Module, optimizer: Optional[torch.optim.Optimizer] = None, model_key: str = "model", optim_key: str = "optim"):
+    if not (Path(ckpt_dir) / '.metadata').exists():
+        raise ValueError(f"Please convert the checkpoint distcp format using `torch.distributed.checkpoint.format_utils.torch_save_to_dcp` before loading it")
+    
     state_dict = {}
     if optimizer is not None:
         state_dict[model_key], state_dict[optim_key] = get_state_dict(model, optimizer)
     else:
         state_dict[model_key] = get_model_state_dict(model)
-        if model_key == "":  # If only loading a model directly, the key should be empty
+        if model_key == "": # If only loading a model directly, the key should be empty
             state_dict = state_dict.pop(model_key)
-
+    
     dcp.load(state_dict, checkpoint_id=ckpt_dir)
-
 
 class CheckpointManager:
     def __init__(self, args: CheckpointArgs):
@@ -110,9 +109,7 @@ class CheckpointManager:
         self.init_ckpt_path = args.init_ckpt_path
         self.continue_training_from_init = args.continue_training_from_init
 
-        assert os.path.exists(
-            self.path
-        ), f"Path {self.path} does not exist and needs to be created before using CheckpointManager (use instantiate_and_make_dir)"
+        assert os.path.exists(self.path), f"Path {self.path} does not exist and needs to be created before using CheckpointManager (use instantiate_and_make_dir)"
 
         self.existing_saves = self.get_existing_saves()
 
@@ -196,9 +193,7 @@ class CheckpointManager:
             if "dp_replicate" in device_mesh.mesh_dim_names:
                 dp_rank = device_mesh.get_local_rank("dp_replicate")
                 if "dp_shard" in device_mesh.mesh_dim_names:
-                    dp_rank = dp_rank * device_mesh[
-                        "dp_replicate"
-                    ].size() + device_mesh.get_local_rank("dp_shard")
+                    dp_rank = dp_rank * device_mesh["dp_replicate"].size() + device_mesh.get_local_rank("dp_shard")
             if "tp" in device_mesh.mesh_dim_names:
                 tp_rank = device_mesh.get_local_rank("tp")
         return dp_rank, tp_rank
@@ -238,7 +233,11 @@ class CheckpointManager:
             dist.barrier()
 
         if get_is_master():
-            config.dump_to_yaml_file(curr_save_dir / CONFIG_NAME)
+            with open(curr_save_dir / CONFIG_NAME, "w") as f:
+                json.dump(
+                    OmegaConf.to_container(OmegaConf.structured(config), resolve=True),
+                    f,
+                )
 
         # Add json dump here
         dp_rank, tp_rank = self._get_dp_tp_mesh(device_mesh)
@@ -277,13 +276,12 @@ class CheckpointManager:
             return
 
         # Only load train state if it's provided, the files exist and we're not loading from init path
-        if False:#train state is bugged atm. cannot reload from ckpt
-            train_state_name = TRAIN_STATE_NAME.format(dp_rank)
-            logger.info("Reloading train state")
-            with open(path / train_state_name, "r") as f:
-                train_state_dict = json.load(f)
-            train_state.load_state_dict(train_state_dict)
-            logger.info("Train state reloaded")
+        train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+        logger.info("Reloading train state")
+        with open(path / train_state_name, "r") as f:
+            train_state_dict = json.load(f)
+        train_state.load_state_dict(train_state_dict)
+        logger.info("Train state reloaded")
 
         logger.info(f"Loading from: {str(path)}")
         state_dict = self.get_state_dict(
@@ -302,7 +300,7 @@ class CheckpointManager:
             optim_state_dict=state_dict["optim"],
         )
         logger.info("Model and optim reloaded")
-
+    
     @classmethod
     def instantiate_and_make_dir(cls, args: CheckpointArgs):
         if get_is_master():

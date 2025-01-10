@@ -58,4 +58,4 @@ logging:
   freq: 10
 
 eval:
-  do: true
+  name: entropy_small

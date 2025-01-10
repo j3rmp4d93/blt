@@ -22,7 +22,8 @@ from bytelatent.base_transformer import (
     RMSNorm,
     cross_entropy,
 )
-
+from pydantic import ConfigDict, model_validator
+from typing_extensions import Self
 
 def create_causal_mask(seqlen, attn_impl, sliding_window):
     if sliding_window is not None and attn_impl == "xformers":
@@ -59,12 +60,14 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 
 class LMTransformerArgs(BaseTransformerArgs):
+    model_config = ConfigDict(extra="forbid")
     seed: int = 42
-
     vocab_size: int = -1
     weight_tying: bool = False
-
     sliding_window: int | None = None
+    @model_validator(mode="after")
+    def check_hash_byte_sizes(self) -> Self:
+        return self
 
 
 class LMTransformer(BaseTransformer):
