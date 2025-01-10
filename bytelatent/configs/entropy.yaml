@@ -2,16 +2,17 @@
 # Evals can be activated by uncommenting its config
 # python -m launchers.stool config=apps/main/configs/debug.yaml nodes=8 account=fair_amaia_cw_codegen qos=lowest
 
-dump_dir: ./models/entropy_small/
-name: "entropy_small"
-steps: 100_000
+dump_dir: ./models/transformer_10m/
+name: transformer_10m
+steps: 19200
 probe_freq: null
 seed: 777
 optim:
-  lr: 4e-04
-  warmup: 500
-  lr_min_ratio: 0.1
-  clip: 10.0
+  lr: 3e-4
+  warmup: 2000
+  lr_min_ratio: 3e-5
+  clip: 1.0
+  beta2: 0.98
 
 distributed:
   fsdp_type: full_shard
@@ -29,11 +30,14 @@ model:
   dim: 256
   ffn_dim_multiplier: 4
 
+#grad_acc_steps*batch_size=will see this many of examples before update weights
+#batch_size = effective batch size
+grad_acc_steps: 2
 data:
   root_dir: ./data
   sources:
     BLT_shuffled: 1.0
-  batch_size: 2
+  batch_size: 64
   prefetch_size: 512
   buffer_size: 1024
   seq_len: 1024
@@ -48,14 +52,12 @@ profiling:
 
 checkpoint:
   dump:
-    every: 500
+    every: 512
     keep: 3
-  eval:
-    every: 1
-    keep: 1
 
 logging:
   freq: 10
 
-eval:
-  name: entropy_small
+#no eval model since code is still bugged
+#eval:
+#  name: entropy_model
