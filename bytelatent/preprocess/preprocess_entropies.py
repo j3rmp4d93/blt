@@ -8,7 +8,10 @@ import torch
 import typer
 from rich.progress import Progress, TextColumn
 
-from bytelatent.data.iterators.arrow_iterator import ArrowFileIterator
+from bytelatent.data.iterators.jsonl_iterator import JsonlIterator
+from bytelatent.data.patcher import calculate_entropies
+from bytelatent.entropy_model import load_entropy_model
+from bytelatent.tokenizers.byte_tokenizer import ByteTokenizer
 
 
 def main(
@@ -20,13 +23,12 @@ def main(
     dry_run: bool = False,
 ):
     # TODO: Modify this to work with the new code
-    raise NotImplementedError()
-    iterator = ArrowFileIterator(
-        file_path=input_file,
+    iterator = JsonlIterator(
+        dataset_files=[input_file],
         worker_id=0,
         num_workers=1,
-    )
-    tokenization_mode = "bytes"
+        arrow_batch_size=100,
+    ).create_iter()
     print(f"Preprocessing entropies, input: {input_file}, output: {output_file}")
     print("Loading entropy model", entropy_model_checkpoint_dir)
     if dry_run:
@@ -34,21 +36,11 @@ def main(
     entropy_model = load_entropy_model(
         entropy_model_checkpoint_dir, device=patching_device
     )
-    entropy_model, _ = to_device(entropy_model, patching_device)
+    #entropy_model, _ = to_device(entropy_model, patching_device)
     print("Creating patcher")
     patching_batch_size = 32
     print("Creating tokenizer")
-    tokenizer = Tokenizer(
-        model_path="/home/artidoro/tokenizers/llama_v2.tokenizer.model",
-        tokenization_mode=tokenization_mode,
-        # BYTE_UNITS
-        vocab_size_unit_1=256,
-        bos=True,
-        eos=True,
-        bpe_delim=False,
-        # This isn't used, just stores a reference for other calls we don't use
-        patcher=None,
-    )
+    tokenizer = ByteTokenizer()
     step = 0
     print("starting")
     start_time = time.time()
@@ -73,16 +65,9 @@ def main(
                         "[green]Calculating entropies...", total=None
                     )
                     for doc in iterator:
-                        sample_id = get_id_from_doc(doc)
-
-                        if "text" in doc:
-                            text = doc["text"]
-                        elif "content" in doc:
-                            text = doc["content"]
-                        else:
-                            raise ValueError(
-                                f"Could not find a text key from: {doc.keys()}"
-                            )
+                        sample_id = doc.sample_id
+                        text = doc.text
+                        
                         tokens = torch.tensor(tokenizer.encode(text))
                         patch_start = time.time()
                         scores = calculate_entropies(

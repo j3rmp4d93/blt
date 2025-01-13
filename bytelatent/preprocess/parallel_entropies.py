@@ -19,6 +19,7 @@ class PreprocessEntropiesJob(submitit.helpers.Checkpointable):
                 "bytelatent.preprocess.preprocess_entropies",
                 str(shard_file),
                 str(output_filename),
+                "--entropy-model-checkpoint-dir=models/transformer_10m/checkpoints/0000019200",
             ],
             check=True,
         )
@@ -34,7 +35,7 @@ def main(
     job_folder: str,
     input_dir: str,
     output_dir: str,
-    qos: str = "explore",
+    account: str,
     slurm_batch_size: int = 1000,
     check_only: bool = False,
     wait: bool = False,
@@ -42,7 +43,7 @@ def main(
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     shard_files = [
-        p for p in input_dir.glob("*.jsonl.shard*") if "COMPLETE" not in p.name
+        p for p in input_dir.glob("*.jsonl.shard*") if "COMPLETE" not in p.name and 'arrow' not in p.name
     ]
     if check_only:
         exist = []
@@ -67,13 +68,16 @@ def main(
     executor = submitit.SlurmExecutor(job_folder)
     executor.update_parameters(
         # 12 hours in minutes
-        time=60 * 12,
-        qos=qos,
-        exclusive="user",
+        job_name='preproc',
+        nodes=1,
+        gpus_per_node=1,
         cpus_per_task=4,
-        num_gpus=1,
-        mem_per_gpu="80G",
+        time=60 * 96,
+        exclusive="user",
+        mem_per_gpu="32G",
         array_parallelism=slurm_batch_size,
+        account=account,
+        partition="gp4d"
     )
 
     jobs = []

@@ -1,16 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-import json
+import yaml
 import os
 import re
 from omegaconf import OmegaConf
 import torch
 
 from bytelatent.transformer import LMTransformer, LMTransformerArgs
+from torch.distributed.checkpoint import format_utils
 
-
-def load_entropy_model(entropy_model_checkpoint_dir, state_dict_path, device="cpu"):
+def load_entropy_model(entropy_model_checkpoint_dir, device="cpu"):
     with open(os.path.join(entropy_model_checkpoint_dir, "params.json")) as fr:
-        reloaded = json.loads(fr.read())
+        reloaded = yaml.safe_load(fr)
 
     torch.set_default_dtype(torch.bfloat16)
     model_params = reloaded["model"]
@@ -19,14 +19,14 @@ def load_entropy_model(entropy_model_checkpoint_dir, state_dict_path, device="cp
             dim=model_params["dim"],
             n_layers=model_params["n_layers"],
             n_heads=model_params["n_heads"],
-            max_seqlen=model_params["max_length"],
+            max_seqlen=model_params["max_seqlen"],
             ffn_dim_multiplier=model_params["ffn_dim_multiplier"],
             vocab_size=model_params["vocab_size"],
         )
     )
-
+    format_utils.dcp_to_torch_save(entropy_model_checkpoint_dir, os.path.join(entropy_model_checkpoint_dir, "model.pt"))
     entropy_model.load_state_dict(
-        torch.load(state_dict_path, map_location=device), strict=False
+        torch.load(os.path.join(entropy_model_checkpoint_dir, "model.pt"))['model'], strict=False
     )
     entropy_model.to(device)
     entropy_model = entropy_model.eval()

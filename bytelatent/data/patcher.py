@@ -69,7 +69,7 @@ def calculate_entropies(
     """
     with torch.no_grad():
         entropies = []
-        max_length = getattr(entropy_model, "max_length", 8192)
+        max_length = getattr(entropy_model, "max_seqlen", 8192)
         batch_numel = max_length * patching_batch_size
         splits = torch.split(tokens.flatten(), batch_numel)
         for split in splits:
@@ -82,7 +82,7 @@ def calculate_entropies(
             if device is not None:
                 split = split.to(device)
             assert torch.all(split >= 0) and torch.all(split < 260)
-            pred, _ = entropy_model(split)
+            pred = entropy_model(token_values=split)
             pred = pred.reshape(-1, pred.shape[-1])[
                 : split.numel() - pad_size, :
             ]  # [batch_size * seq_len, vocab]
