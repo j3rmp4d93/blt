@@ -17,7 +17,7 @@ class PackingArgs(BaseModel):
     max_length: int | None
     pad_to_max_length: bool
     enable_byte_ngrams: bool
-    is_for_blt: bool = False
+    is_for_blt: bool
 
 
 class PackingIteratorState(BaseModel, IteratorState):

@@ -49,7 +49,18 @@ def distribute_data_to_rank(
     world_size: int,
     for_blt: bool,
 ) -> ArrowFileIterator:
-    dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size)
+    dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size, file_pattern="*.chunk.*.jsonl.*.arrow" if for_blt else "*.chunk.*.jsonl")
+    if for_blt:
+        return ArrowFileIterator(
+            file_path=None,
+            worker_id=0,#dataset_chunks[rank] consists shards for this worker, there is no need to further filter data out.
+            num_workers=1,
+            preprocess_dir=preprocess_dir,
+            dataset_files=dataset_chunks[rank],
+            entropy_model_name=entropy_model_name,
+            arrow_batch_size=arrow_batch_size,
+            for_blt=for_blt,
+        )
     n_workers_per_chunk = world_size // len(dataset_chunks)
     rank_to_arrow_iterator_params = []
     for chunk_path in dataset_chunks:
@@ -130,7 +141,7 @@ class DataloaderArgs(BaseModel):
         return source_to_sequence_iterator
 
     def build_from_rank(
-        self, rank: int, world_size: int
+        self, rank: int, world_size: int, is_for_blt: bool
     ) -> StatefulIterator[Batch, Any]:
         source_to_sequence_iterators = self._create_sequence_iterators(rank, world_size)
         weight_rng_state = get_rng_state(self.seed + 1, rank, world_size)
@@ -147,6 +158,7 @@ class DataloaderArgs(BaseModel):
             max_length=self.max_encoder_seq_length,
             pad_to_max_length=self.pad_to_max_length,
             enable_byte_ngrams=self.enable_byte_ngrams,
+            is_for_blt=is_for_blt,
         )
         packing_iterator = PackingIterator(sampling_iterator, packing_args=packing_args)
         mp_iterator = MultiprocessIterator(

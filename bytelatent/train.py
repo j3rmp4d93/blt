@@ -285,7 +285,7 @@ def train(args: TrainArgs, model_cls, model_args_cls):
 
         # build optimizer after apply parallelisms to the model
         optimizer, scheduler = build_optimizer(model, args.optim, args.steps)
-        data_loader = args.data.build_from_rank(dp_rank, dp_degree)
+        data_loader = args.data.build_from_rank(dp_rank, dp_degree, is_for_blt=model_cls==ByteLatentTransformer)
         data_loader_state = data_loader.get_state()
 
         train_state = TrainState(

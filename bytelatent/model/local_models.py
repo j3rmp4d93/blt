@@ -104,6 +104,8 @@ class LocalModelBase(nn.Module):
 
     def init_weights(self, init_std=None):
         self.rope.reset_parameters()
+        #without reseting parameters of self.norm, it will be all zeros!
+        self.norm.reset_parameters()
 
         init_std = init_std or (self.dim ** (-0.5))
         nn.init.trunc_normal_(
@@ -159,7 +161,7 @@ class LocalModelBase(nn.Module):
                 b=3 * init_std,
             )
 
-        if self.cross_attn_layers is not None:
+        if (self.cross_attn_encoder or self.cross_attn_decoder) and self.cross_attn_layers is not None:
             for depth, layer in enumerate(self.cross_attn_layers):
                 factor = {
                     InitStdFactor.CURRENT_DEPTH: (2 * (depth + 1)) ** 0.5,
