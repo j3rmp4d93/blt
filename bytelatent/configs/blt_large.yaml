@@ -2,15 +2,15 @@
 # Evals can be activated by uncommenting its config
 # python -m launchers.stool config=apps/main/configs/debug.yaml nodes=8 account=fair_amaia_cw_codegen qos=lowest
 
-dump_dir: ./models/blt_base/
-name: blt_base
-steps: 19200
+dump_dir: ./models/blt_large/
+name: blt_large
+steps: 142811
 probe_freq: null
 seed: 777
 optim:
-  lr: 3e-4
+  lr: 15e-5
   warmup: 2000
-  lr_min_ratio: 3e-5
+  lr_min_ratio: 15e-6
   clip: 1.0
   beta2: 0.98
 
@@ -23,18 +23,18 @@ distributed:
   tp_size: 1
 
 model:
-  n_layers_global: 8
-  n_layers_local_decoder: 2
-  n_layers_local_encoder: 2
-  n_heads_local_encoder: 16
-  n_heads_local_decoder: 16
-  n_heads_global: 16
-  dim_global: 512
-  dim_local_encoder: 512
-  dim_local_decoder: 512
+  n_layers_global: 10
+  n_layers_local_decoder: 6
+  n_layers_local_encoder: 6
+  n_heads_local_encoder: 32
+  n_heads_local_decoder: 32
+  n_heads_global: 32
+  dim_global: 2048
+  dim_local_encoder: 1024
+  dim_local_decoder: 1024
   ffn_dim_multiplier: 1
   vocab_size: 260
-  dim_token: 512
+  dim_token: 1024
   patch_size: 6
   tokenization_mode: "bytes"
   patching_mode: "space"
@@ -80,13 +80,13 @@ model:
 
 #grad_acc_steps*batch_size=will see this many of examples before update weights
 #batch_size = effective batch size
-#current setting is based on 1 gpu with 32gb, 15 sec/step
-grad_acc_steps: 8
+#current setting is based on 1 gpu with 32gb, 165 sec/step
+grad_acc_steps: 64
 data:
   root_dir: ./data
   sources:
     fineweb_edu: 1.0
-  batch_size: 16
+  batch_size: 2
   prefetch_size: 512
   buffer_size: 1024
   seq_len: 1024
