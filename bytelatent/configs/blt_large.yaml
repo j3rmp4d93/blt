@@ -21,6 +21,8 @@ distributed:
   matmul_allow_tf32: false
   selective_activation_checkpointing: false
   tp_size: 1
+  dp_replicate: 8
+  consistent_sample_count: true
 
 model:
   n_layers_global: 10
@@ -109,7 +111,7 @@ checkpoint:
     keep: 3
 
 logging:
-  freq: 1
+  freq: 10
 
 #no eval model since code is still bugged
 #eval:

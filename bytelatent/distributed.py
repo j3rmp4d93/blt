@@ -76,6 +76,8 @@ class DistributedArgs(BaseModel):
 
     spawn_method: str = "forkserver"
 
+    consistent_sample_count: bool= False#whether to keep the training samples consistent between single-device and multi-devices(dp_replicate>1) training.
+
 
 class EnvironmentArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")

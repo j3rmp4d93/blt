@@ -50,34 +50,16 @@ def distribute_data_to_rank(
     for_blt: bool,
 ) -> ArrowFileIterator:
     dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size, file_pattern="*.chunk.*.jsonl.*.arrow" if for_blt else "*.chunk.*.jsonl")
-    if for_blt:
-        return ArrowFileIterator(
-            file_path=None,
-            worker_id=0,#dataset_chunks[rank] consists shards for this worker, there is no need to further filter data out.
-            num_workers=1,
-            preprocess_dir=preprocess_dir,
-            dataset_files=dataset_chunks[rank],
-            entropy_model_name=entropy_model_name,
-            arrow_batch_size=arrow_batch_size,
-            for_blt=for_blt,
-        )
-    n_workers_per_chunk = world_size // len(dataset_chunks)
-    rank_to_arrow_iterator_params = []
-    for chunk_path in dataset_chunks:
-        for worker_id in range(n_workers_per_chunk):
-            rank_to_arrow_iterator_params.append(
-                ArrowFileIterator(
-                    file_path=chunk_path,
-                    worker_id=worker_id,
-                    num_workers=n_workers_per_chunk,
-                    preprocess_dir=preprocess_dir,
-                    dataset_files=None,
-                    entropy_model_name=entropy_model_name,
-                    arrow_batch_size=arrow_batch_size,
-                    for_blt=for_blt,
-                )
-            )
-    return rank_to_arrow_iterator_params[rank]
+    return ArrowFileIterator(
+        file_path=None,
+        worker_id=rank,
+        num_workers=world_size,
+        preprocess_dir=preprocess_dir,
+        dataset_files=sorted(dataset_chunks),
+        entropy_model_name=entropy_model_name,
+        arrow_batch_size=arrow_batch_size,
+        for_blt=for_blt,
+    )
 
 
 class DataloaderArgs(BaseModel):

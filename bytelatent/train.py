@@ -147,6 +147,20 @@ def validate_train_args(args: TrainArgs, output_size: int):
                 and args.distributed.dp_replicate == get_world_size()
             )
 
+    if args.distributed.consistent_sample_count and args.distributed.dp_replicate>1:
+        logger.warning(
+            "consistent_sample_count has been enabled to make sure number of training data is idential between single-device and multi-devices training"
+        )
+        if args.distributed.dp_replicate <= args.grad_acc_steps:
+            args.grad_acc_steps=args.grad_acc_steps//args.distributed.dp_replicate
+            assert args.grad_acc_steps>=1, "grad acc steps is smaller than 1 after consistent_sample_count adjustment"
+        else:
+            assert args.data.batch_size*args.grad_acc_steps>args.distributed.dp_replicate
+            
+            args.data.batch_size=args.data.batch_size//(args.distributed.dp_replicate//args.grad_acc_steps)
+            args.grad_acc_steps=1
+            assert args.data.batch_size>=1, "batch size is smaller than 1 after consistent_sample_count adjustment"
+
     args.model.max_seqlen = args.data.seq_len
 
     if args.distributed.tp_size == 1:

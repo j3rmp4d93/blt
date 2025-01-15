@@ -230,9 +230,7 @@ def find_and_sanitize_chunks(
     dataset_path: str, world_size: int, file_pattern: str = TRAIN_DATA_FILE_PATTERN
 ):
     dataset_chunks = [str(p) for p in Path(dataset_path).glob(file_pattern)]
-    chunks_per_worker = [list([str(p) for p in chunk_pw]) for chunk_pw in np.array_split(dataset_chunks, world_size)]
-    #im spliting the list of shards into *world_size* of sublist evenly
-    return chunks_per_worker
+    return dataset_chunks
     n_chunks = len(dataset_chunks)
 
     if n_chunks > world_size:
