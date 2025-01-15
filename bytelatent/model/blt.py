@@ -810,12 +810,6 @@ class ByteLatentTransformer(nn.Module):
             local_encoder_dim=self.local_encoder.dim,
             encoder_hash_byte_group_size=None,
         )
-        self.tok_embeddings = torch.nn.Embedding(args.vocab_size, args.dim)
-
-        # Transformer layers
-        self.layers = nn.ModuleList(
-            [TransformerBlock(args) for _ in range(args.n_layers)]
-        )
 
         # Encoder ngram embedding tables
         self.encoder_ngram_embedding = None
@@ -833,9 +827,6 @@ class ByteLatentTransformer(nn.Module):
 
         # Output layer
         assert args.vocab_size > 0, "vocab_size must be greater than 0"
-        self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
-        if args.weight_tying:
-            self.output.weight = self.tok_embeddings.weight
 
         # Patcher module
         if not args.data_loader_patching:
@@ -1021,34 +1012,10 @@ class ByteLatentTransformer(nn.Module):
     def reset_parameters(self, init_std=None):
         # Either use fixed base std or sqrt model dim
         init_std = init_std or (self.dim ** (-0.5))
-        nn.init.trunc_normal_(
-            self.tok_embeddings.weight,
-            mean=0.0,
-            std=init_std,
-            a=-3 * init_std,
-            b=3 * init_std,
-        )
-        if not self.weight_tying:
-            nn.init.trunc_normal_(
-                self.output.weight,
-                mean=0.0,
-                std=init_std,
-                a=-3 * init_std,
-                b=3 * init_std,
-            )
 
     def init_weights(self):
         self.reset_parameters()
         self.init_base_std = self.init_base_std or (self.dim ** (-0.5))
-        for depth, layer in enumerate(self.layers):
-            factor = {
-                InitStdFactor.CURRENT_DEPTH: (2 * (depth + 1)) ** 0.5,
-                InitStdFactor.GLOBAL_DEPTH: (2 * (len(self.layers) + 1)) ** 0.5,
-                InitStdFactor.DIM_RATIO: self.dim / 4096,
-                InitStdFactor.DISABLED: 1.0,
-            }[self.init_std_factor]
-
-            layer.init_weights(self.init_base_std, factor)
 
         self.local_decoder.init_weights(self.init_base_std)
         self.global_transformer.init_weights(self.init_base_std)

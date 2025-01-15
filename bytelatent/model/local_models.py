@@ -24,9 +24,9 @@ logger = logging.getLogger()
 
 
 class LocalModelBase(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, is_encoder):
         super().__init__()
-
+        self.is_encoder=is_encoder
         self.dim = args.dim
         self.dropout = args.dropout
         self.vocab_size = args.vocab_size + args.pm_size
@@ -41,13 +41,13 @@ class LocalModelBase(nn.Module):
         self.cross_attn_k = getattr(args, "cross_attn_k", None)
 
         self.boe_id = BOE_ID
-
-        self.norm = RMSNorm(args.dim, eps=args.norm_eps)
+        if not self.is_encoder:
+            self.norm = RMSNorm(args.dim, eps=args.norm_eps)
         self.layers = nn.ModuleList(
             [TransformerBlock(args) for _ in range(args.n_layers)]
         )
-
-        self.tok_embeddings = nn.Embedding(self.vocab_size, args.dim)
+        if self.is_encoder:
+            self.tok_embeddings = nn.Embedding(self.vocab_size, args.dim)
         if not self.use_rope:
             self.pos_embeddings = nn.Embedding(args.max_length, args.dim)
         else:
@@ -105,16 +105,18 @@ class LocalModelBase(nn.Module):
     def init_weights(self, init_std=None):
         self.rope.reset_parameters()
         #without reseting parameters of self.norm, it will be all zeros!
-        self.norm.reset_parameters()
+        if not self.is_encoder:
+            self.norm.reset_parameters()
 
         init_std = init_std or (self.dim ** (-0.5))
-        nn.init.trunc_normal_(
-            self.tok_embeddings.weight,
-            mean=0.0,
-            std=init_std,
-            a=-3 * init_std,
-            b=3 * init_std,
-        )
+        if self.is_encoder:
+            nn.init.trunc_normal_(
+                self.tok_embeddings.weight,
+                mean=0.0,
+                std=init_std,
+                a=-3 * init_std,
+                b=3 * init_std,
+            )
         if self.pos_embeddings is not None:
             nn.init.trunc_normal_(
                 self.pos_embeddings.weight,
@@ -175,7 +177,7 @@ class LocalModelBase(nn.Module):
 
 class LocalEncoder(LocalModelBase):
     def __init__(self, args):
-        super().__init__(args)
+        super().__init__(args, True)
         self.output_proj = (
             args.patching_mode in ["entropy", "probmax"]
         ) and args.entropy_model_checkpoint_dir is None
@@ -276,7 +278,7 @@ class LocalEncoder(LocalModelBase):
 
 class LocalDecoder(LocalModelBase):
     def __init__(self, args):
-        super().__init__(args)
+        super().__init__(args, False)
 
         # Model configuration flags
         self.patch_only = args.patch_only_decoder

@@ -148,13 +148,6 @@ def build_fsdp_grouping_plan(model_args: LMTransformerArgs):
     group_plan: Tuple[int, bool] = []
 
     # Grouping and output seperately
-    group_plan.append(("tok_embeddings", False))
-
-    # Grouping by layers
-    for i in range(model_args.n_layers):
-        group_plan.append((f"layers.{i}", False))
-
-    group_plan.append(("output", True))
 
     return group_plan
 

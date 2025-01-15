@@ -277,13 +277,12 @@ class CheckpointManager:
             return
 
         # Only load train state if it's provided, the files exist and we're not loading from init path
-        if False:#train state is bugged atm. cannot reload from ckpt
-            train_state_name = TRAIN_STATE_NAME.format(dp_rank)
-            logger.info("Reloading train state")
-            with open(path / train_state_name, "r") as f:
-                train_state_dict = json.load(f)
-            train_state.load_state_dict(train_state_dict)
-            logger.info("Train state reloaded")
+        train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+        logger.info("Reloading train state")
+        with open(path / train_state_name, "r") as f:
+            train_state_dict = json.load(f)
+        train_state.load_state_dict(train_state_dict)
+        logger.info("Train state reloaded")
 
         logger.info(f"Loading from: {str(path)}")
         state_dict = self.get_state_dict(

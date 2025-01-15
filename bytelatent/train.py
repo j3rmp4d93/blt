@@ -26,6 +26,7 @@ from torch.optim import lr_scheduler
 from bytelatent.args import TrainArgs
 from bytelatent.checkpoint import CheckpointManager, load_from_checkpoint
 from bytelatent.data.data_types import DataLoaderState
+from bytelatent.data.iterators.multiprocess_iterator import MultiprocessIteratorState
 from bytelatent.distributed import (
     check_model_value_range,
     clean_env,
@@ -84,7 +85,7 @@ class TrainState(Stateful):
     step: int  # Nb of steps taken by the optimizer
     acc_step: int  # Nb of accumulation steps done since last optimizer step
     scheduler: lr_scheduler.LambdaLR
-    data_loader_state: DataLoaderState
+    data_loader_state: MultiprocessIteratorState
     scale: float = 1.0
 
     def state_dict(self) -> Dict[str, Any]:
@@ -98,7 +99,7 @@ class TrainState(Stateful):
     def load_state_dict(self, state_dict):
         self.step = state_dict["step"]
         self.acc_step = state_dict["acc_step"]
-        self.data_loader_state = DataLoaderState(**state_dict["data_loader_state"])
+        self.data_loader_state = MultiprocessIteratorState(**state_dict["data_loader_state"])
         self.scheduler.load_state_dict(state_dict["scheduler"])
 
 
