@@ -241,6 +241,7 @@ class LocalEncoder(LocalModelBase):
             if self.cross_attn_encoder and (
                 i == len(self.layers) - 1 or self.cross_attn_all_layers_encoder
             ):
+                #local encoder的patch_embeds初始是拿bytes的selfattn結果pool後得到
                 patch_embeds = self.apply_cross_attention(
                     h, patch_embeds, i, bs, num_patches, patch_ids, cross_mask
                 )

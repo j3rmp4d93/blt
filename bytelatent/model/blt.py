@@ -856,6 +856,7 @@ class ByteLatentTransformer(nn.Module):
 
         # Get megabyte inputs
         nb_boe = int(0 if self.patching_mode != "" else self.patch_size - 1)
+        #func has no effects???
         local_encoder_tokens, _, local_decoder_tokens = get_blt_input(
             tokens=tokens,
             enforce_patch_size_multiple=False,
@@ -884,6 +885,12 @@ class ByteLatentTransformer(nn.Module):
         patch_ids = patch_ids_from_lengths(
             patch_lengths, local_encoder_tokens.shape[-1]
         )
+        #patch_ids[0, :20]
+        #tensor([0, 1, 1, 2, 2, 2, 2, 2, 3, 4, 4, 4, 4, 5, 6, 7, 7, 8, 8, 8],
+            #device='cuda:0')
+        #patch_lengths[0, :20]
+        #tensor([1, 2, 5, 1, 4, 1, 1, 2, 5, 4, 4, 6, 1, 3, 2, 4, 1, 1, 4, 1],
+            #device='cuda:0')
         assert torch.max(patch_ids) + 1 <= torch.max(
             (patch_lengths != 0).sum(dim=-1)
         ), f"{torch.max(patch_ids) + 1} > {torch.max((patch_lengths != 0).sum(dim=-1))}"
@@ -931,6 +938,7 @@ class ByteLatentTransformer(nn.Module):
 
         # Local encoder
         h_cross = None
+        #h_cross是patch rep, h_encoder是tokens rep也是decoder輸入
         (h_encoder, h_cross), cache_encoder = self.local_encoder(
             tokens=local_encoder_tokens,
             embeds=local_encoder_embeds,
@@ -955,6 +963,8 @@ class ByteLatentTransformer(nn.Module):
             )
         else:
             # Reshape h_cross
+            #不理解為何hidden會變大
+            #=>會把local encoder的size變大cross_attn_k倍
             h = h_cross.view(bs, patch_lengths.shape[1], -1)
 
         # Global transformer
@@ -965,7 +975,7 @@ class ByteLatentTransformer(nn.Module):
 
         h, _ = self.global_transformer(
             embeds=h,
-            tokens=global_tokens,
+            tokens=global_tokens,#沒有卵用??
         )
 
         # Unpatching
@@ -975,6 +985,12 @@ class ByteLatentTransformer(nn.Module):
         decoder_patch_ids = decoder_patch_ids_from_lengths(
             patch_lengths, nb_boe, local_decoder_tokens.shape[-1]
         )
+        #patch_lengths[0,:20]
+        #tensor([1, 2, 5, 1, 4, 1, 1, 2, 5, 4, 4, 6, 1, 3, 2, 4, 1, 1, 4, 1],
+            #device='cuda:0')
+        #decoder_patch_ids[0, :20]
+        #tensor([0, 0, 1, 1, 1, 1, 1, 2, 3, 3, 3, 3, 4, 5, 6, 6, 7, 7, 7, 7],
+            #device='cuda:0')
         assert (
             torch.max(decoder_patch_ids) + 1 <= h.shape[1]
         ), f"{torch.max(decoder_patch_ids) + 1} > {h.shape[1]}"
@@ -995,11 +1011,35 @@ class ByteLatentTransformer(nn.Module):
                 patch_lengths,
                 N,
                 patches_as_queries=False,
-                cross_attn_k=self.cross_attn_k,
+                cross_attn_k=1,#should be 1 after global_transformer
                 window=self.cross_attn_window_decoder,
                 block_mask=self.cross_attn_use_flex_attention,
             )
-
+            #cross_mask[0,: 20, :20].int()
+                #tensor([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                #[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+            #device='cuda:0', dtype=torch.int32)
+                #patch_lengths[0,: 20].int()
+                #tensor([1, 2, 5, 1, 4, 1, 1, 2, 5, 4, 4, 6, 1, 3, 2, 4, 1, 1, 4, 1],
+            #device='cuda:0', dtype=torch.int32)
         # Local decoder
         output, _ = self.local_decoder(
             embeds=dec_embeds,

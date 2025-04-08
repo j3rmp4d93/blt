@@ -549,6 +549,17 @@ class Patcher:
             patch_lengths = patch_lengths_from_start_ids(
                 patch_start_ids, seq_len_next_tok
             )
+            #patch_lengths[0,:20]
+            #tensor([ 1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  3,  1,  3,  7,  5, 10,  1,
+                    #1,  5])
+            #scores[0, :30]
+            #tensor([2.8594, 2.6406, 1.9609, 1.7422, 1.6172, 3.7031, 1.8516, 1.6797, 1.5469,
+                    #1.0625, 0.7031, 1.2969, 1.1172, 2.7500, 1.5391, 0.1387, 0.0903, 3.0469,
+                    #1.5156, 1.2031, 0.2520, 1.5156, 0.1895, 0.0149, 0.6680, 0.0693, 0.1216,
+                    #0.2695, 2.4219, 0.5586])
+            #self.threshold
+            #1.335442066192627
+            #(scores>=self.threshold).sum()==patch_lengths.shape[1]
             if self.log_time:
                 self.log["patch_lengths_from_start_ids"] += time.time() - s
                 s = time.time()

@@ -85,6 +85,9 @@ def truncate_batch(
                     batch.mask[i, max_length:] = False
                 batch.patch_lengths[i, j:] = 0
                 batch.patch_lengths[i, j] = max_length_adj - count
+                #最後一個patch可能因為truncate的原因而少掉原先幾個token,因此要更新batch.patch_lengths[i, j]
+                #也就是無條件把一個sequence的最後token認定為patch的結尾
+                #而且最後這個patch也只要生成一個token的patch(對吧？)
 
         # Truncate if necessary.
         if max_length < batch.x.shape[1]:
@@ -177,7 +180,7 @@ class PackingIterator(StatefulIterator[Batch, PackingIteratorState]):
                     if _patch_lengths[0] > 1:
                         last_patch_length = _patch_lengths[-1]
                         _patch_lengths[0] -= 1
-                        _patch_lengths = [1] + _patch_lengths[:-1]
+                        _patch_lengths = [1] + _patch_lengths[:-1]#把第一個token視為一個patch
                     tokens.append(_tokens[: len(_tokens) - last_patch_length])
                     masks.append(_mask[: len(_mask) - last_patch_length])
                     patch_lengths.append(_patch_lengths)

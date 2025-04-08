@@ -16,7 +16,10 @@ def patch_reduce(h, max_num_patches, reduction, patch_ids):
     will be sent to a dummy patch, which is trimmed before returning.
     """
     bs, seq_len, emb_dim = h.shape
-
+    #patch_ids[0,:10,0]
+    #tensor([0, 1, 1, 2, 2, 2, 2, 2, 3, 4], device='cuda:0')
+    #會把有相同patch id的h做reduction,如0只有一個,而1有第二和第三兩個
+    #yaml裡的reduction是max
     patch_ids = patch_ids.unsqueeze(-1).expand(-1, -1, h.shape[-1])
 
     reduced_embs = torch.zeros(
